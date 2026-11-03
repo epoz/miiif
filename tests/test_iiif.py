@@ -6,8 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.main import app, get_service
-from app.image_service import IIIFImageService
+from iiif.main import app, get_service
+from iiif.image_service import IIIFImageService
 
 client = TestClient(app)
 

@@ -12,7 +12,7 @@ Python bindings via the [`pyvips`](https://pypi.org/project/pyvips/) package).
 
 ```bash
 uv sync --extra dev
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn iiif.main:app --host 0.0.0.0 --port 8000
 ```
 
 ## Docker
