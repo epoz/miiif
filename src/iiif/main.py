@@ -27,7 +27,7 @@ app = FastAPI(
 )
 
 service = IIIFImageService(
-    settings.search_dirs,
+    settings.image_db,
     max_width=settings.max_width,
     max_height=settings.max_height,
     max_area=settings.max_area,

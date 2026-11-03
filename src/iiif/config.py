@@ -9,13 +9,15 @@ load_dotenv()
 
 DEFAULT_SEARCH_DIRS: tuple = ("/data/images",)
 
+DEFAULT_IMAGE_DB: str = "/data/images.db"
+
 DEFAULT_MAX_WIDTH = 4000
 DEFAULT_MAX_HEIGHT = 4000
 DEFAULT_MAX_AREA: int | None = None
 
 DEFAULT_INFO_VERSION = "3"  # "2" or "3"
 
-DEFAULT_TILE_CACHE_DIR = "/var/www/iiif-cache"
+DEFAULT_TILE_CACHE_DIR = "/data/iiif-cache"
 
 
 class Settings:
@@ -29,6 +31,10 @@ class Settings:
         if not raw:
             return list(DEFAULT_SEARCH_DIRS)
         return [d.strip() for d in raw.split(",") if d and d.strip()]
+
+    @property
+    def image_db(self) -> str:
+        return os.environ.get("IIIF_IMAGE_DB") or DEFAULT_IMAGE_DB
 
     @property
     def max_width(self) -> int:

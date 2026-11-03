@@ -91,6 +91,7 @@ file placed in the project root (loaded automatically via `python-dotenv`):
 
 ```bash
 IIIF_IMAGE_DIRS=/data/images,/data/images2
+IIIF_IMAGE_DB=/data/images.db
 IIIF_MAX_WIDTH=4000
 IIIF_MAX_HEIGHT=4000
 IIIF_MAX_AREA=
@@ -98,12 +99,44 @@ IIIF_IMAGE_API_VERSION=3
 IIIF_CACHE_DIR=/var/www/iiif-cache
 ```
 
-* `IIIF_IMAGE_DIRS` — comma separated list of directories searched for image
-  files (in order of priority). Defaults to `/data/images`.
+* `IIIF_IMAGE_DIRS` — comma separated list of directories scanned by the
+  `iiif-populate` command to build the image lookup database (in order of
+  priority). Defaults to `/data/images`.
+* `IIIF_IMAGE_DB` — path to the SQLite image lookup database used to resolve
+  image identifiers to files. Defaults to `/data/images.db`.
 * `IIIF_MAX_WIDTH`, `IIIF_MAX_HEIGHT`, `IIIF_MAX_AREA` — server imposed maximum
   image dimensions / area.
 * `IIIF_IMAGE_API_VERSION` — default version of the image information document
   served (`3` or `2`).
+* `IIIF_CACHE_DIR` — directory used to cache generated tiles.
+
+## Populating the image lookup database
+
+Image identifiers are resolved through a SQLite database with an `identifier`
+and a `path` column (a lookup table). The database is populated from the
+configured image directories (or from the directories passed to the command)
+by scanning them recursively for image files:
+
+```bash
+uv run python -m iiif.populate
+```
+
+The command indexes every supported image file found (including files in
+subdirectories) into the lookup database, using the filename as identifier and
+the full file path as location. Afterwards the server looks images up in this
+database instead of scanning directories at request time:
+
+```bash
+IIIF_IMAGE_DIRS=/data/images uv run python -m iiif.populate
+uv run uvicorn iiif.main:app --host 0.0.0.0 --port 8000
+```
+
+Use `--dirs` / `--db` to override the scanned directories and the database
+path, e.g.:
+
+```bash
+uv run python -m iiif.populate --dirs /data/images /data/images2 --db /data/images.db
+```
 
 ## Tests
 
@@ -113,8 +146,10 @@ uv run python -m pytest tests/ -q
 
 ## Notes
 
-* Image identifiers are matched against filenames inside the configured
-  directories; the first matching directory (in configuration order) wins.
+* Image identifiers are looked up in the SQLite lookup database populated by
+  the `iiif.populate` command; when the database is built from multiple
+  directories, entries from directories earlier in the configuration order take
+  precedence.
 * All image manipulation (region extraction, resizing, rotation, quality,
   format conversion) is performed by libvips.
 * Generated tiles are written atomically (write to temporary file, then `os.replace`)

@@ -12,6 +12,7 @@ specification order:
 import math
 import os
 import re
+import sqlite3
 from pathlib import Path
 
 import pyvips
@@ -57,19 +58,71 @@ IMAGE_FORMATS = {
 
 QUALITY_VALUES = ("default", "color", "gray", "bitonal")
 
+# File extensions that are tried, in order, when resolving an image identifier
+# that does not carry a file extension itself.
+LOOKUP_EXTENSIONS = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".gif",
+    ".webp",
+    ".jp2",
+)
+
+# Image file suffixes (without leading dot, lowercased) that are indexed from
+# the image directories.
+_IMAGE_SUFFIXES = set()
+for _key, (_mime, _suffix) in IMAGE_FORMATS.items():
+    _IMAGE_SUFFIXES.add(_key.lower())
+    _IMAGE_SUFFIXES.add(_suffix.lower().lstrip("."))
+IMAGE_SUFFIXES = frozenset(_IMAGE_SUFFIXES)
+
+# Preferred names of the SQLite lookup tables holding the image identifier to
+# file path mapping, in order of preference.
+LOOKUP_TABLE_CANDIDATES = ("images", "image_lookup", "lookup")
+
 
 class IIIFImageService:
-    """Serve IIIF image requests for images found in configured directories."""
+    """Serve IIIF image requests for images registered in the lookup database."""
 
     def __init__(
         self,
-        directories,
+        lookup_db: str | Path | list[str | Path] | None = None,
         max_width: int | None = None,
         max_height: int | None = None,
         max_area: int | None = None,
         cache_dir: str | None = None,
+        directories: list[str | Path] | None = None,
     ):
-        self.directories = [Path(d) for d in directories]
+        """Create the IIIF image service.
+
+        Images are not scanned from disk directly but resolved through a SQLite
+        database holding a lookup table with ``identifier`` and ``path`` columns
+        (see the ``iiif.populate`` command to (re)build it).
+
+        Args:
+            lookup_db: Path to the SQLite image lookup database. Defaults to
+                the database configured through ``IIIF_IMAGE_DB``.
+            max_width: Server side maximum image width.
+            max_height: Server side maximum image height.
+            max_area: Server side maximum image area.
+            cache_dir: Directory used to cache generated tiles.
+            directories: Image directories, accepted for backwards
+                compatibility; lookups no longer scan directories.
+        """
+        if isinstance(lookup_db, (list, tuple)):
+            # Backwards compatibility: a sequence of image directories was
+            # passed instead of a lookup database path.
+            directories = list(lookup_db)
+            lookup_db = None
+        self.directories = (
+            [Path(d) for d in directories] if directories is not None else []
+        )
+        self.lookup_db = (
+            Path(lookup_db) if lookup_db is not None else Path(settings.image_db)
+        )
         self.max_width = max_width if max_width is not None else settings.max_width
         self.max_height = max_height if max_height is not None else settings.max_height
         self.max_area = max_area if max_area is not None else settings.max_area
@@ -79,39 +132,55 @@ class IIIFImageService:
     # Image lookup
     # ------------------------------------------------------------------
     def find_image(self, identifier: str) -> Path:
-        """Find the file for an image identifier in the configured directories.
+        """Find the file for an image identifier in the lookup database.
 
-        The directories are searched in the order in which they are
-        configured; the first directory containing a file whose filename
-        matches the image identifier wins. Identifiers without a file extension
-        are looked up with a set of common image file extensions appended.
+        The identifier is looked up in the SQLite lookup table, whose ``path``
+        column holds the file the identifier points to. Identifiers without a
+        file extension are looked up with a set of common image file extensions
+        appended.
         """
         if not identifier or "/" in identifier or "\\" in identifier:
             raise BadRequest("Image identifier must be a filename, not a path")
+        path = self._lookup_path(identifier)
+        if path is None or not Path(path).is_file():
+            raise ImageNotFound(f"Image not found: {identifier}")
+        return Path(path)
+
+    def _lookup_path(self, identifier: str) -> str | None:
+        """Return the file path registered for an identifier, if any."""
         candidates = [identifier]
         if "." not in identifier:
-            candidates += [
-                f"{identifier}{ext}"
-                for ext in (
-                    ".jpg",
-                    ".jpeg",
-                    ".png",
-                    ".tif",
-                    ".tiff",
-                    ".gif",
-                    ".webp",
-                    ".jp2",
-                )
-            ]
-        for directory in self.directories:
-            for name in candidates:
-                candidate = directory / name
-                try:
-                    if candidate.is_file():
-                        return candidate
-                except OSError:
-                    continue
-        raise ImageNotFound(f"Image not found: {identifier}")
+            candidates += [f"{identifier}{ext}" for ext in LOOKUP_EXTENSIONS]
+        conn = sqlite3.connect(str(self.lookup_db))
+        try:
+            table = self._lookup_table(conn)
+            if table is None:
+                return None
+            query = f'SELECT "path" FROM "{table}" WHERE "identifier" = ?'
+            for candidate in candidates:
+                row = conn.execute(query, (candidate,)).fetchone()
+                if row is not None and row[0]:
+                    return row[0]
+            return None
+        except sqlite3.Error:
+            # Unusable database (e.g. not initialized yet): nothing to find.
+            return None
+        finally:
+            conn.close()
+
+    def _lookup_table(self, conn) -> str | None:
+        """Return the name of the lookup table holding the identifier mapping."""
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+        names = [row[0] for row in rows]
+        candidates = [name for name in LOOKUP_TABLE_CANDIDATES if name in names]
+        candidates += [name for name in names if name not in LOOKUP_TABLE_CANDIDATES]
+        for name in candidates:
+            columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{name}")')}
+            if {"identifier", "path"} <= columns:
+                return name
+        return None
 
     def _load(self, identifier: str):
         path = self.find_image(identifier)
