@@ -15,7 +15,7 @@ from .config import settings
 from .image_service import IMAGE_SUFFIXES
 
 LOOKUP_SCHEMA = """
-CREATE TABLE IF NOT EXISTS images (
+CREATE TABLE IF NOT EXISTS image_map (
     identifier TEXT PRIMARY KEY,
     path TEXT NOT NULL
 )
@@ -45,9 +45,9 @@ def populate(directories, db_path) -> int:
                     if path.suffix.lower().lstrip(".") not in IMAGE_SUFFIXES:
                         continue
                     entries.append((path.name, str(path)))
-        conn.execute("DELETE FROM images")
+        conn.execute("DELETE FROM image_map")
         conn.executemany(
-            "INSERT OR IGNORE INTO images (identifier, path) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO image_map (identifier, path) VALUES (?, ?)",
             entries,
         )
         conn.commit()

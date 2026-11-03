@@ -24,7 +24,7 @@ def lookup_db(tmp_path):
     db = tmp_path / "images.db"
     conn = sqlite3.connect(str(db))
     conn.execute(
-        "CREATE TABLE images (identifier TEXT PRIMARY KEY, path TEXT NOT NULL)"
+        "CREATE TABLE image_map (identifier TEXT PRIMARY KEY, path TEXT NOT NULL)"
     )
     conn.commit()
     conn.close()
@@ -34,7 +34,7 @@ def lookup_db(tmp_path):
 def register_image(db, identifier: str, path) -> None:
     conn = sqlite3.connect(str(db))
     conn.execute(
-        "INSERT OR REPLACE INTO images (identifier, path) VALUES (?, ?)",
+        "INSERT OR REPLACE INTO image_map (identifier, path) VALUES (?, ?)",
         (identifier, str(path)),
     )
     conn.commit()

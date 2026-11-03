@@ -79,10 +79,6 @@ for _key, (_mime, _suffix) in IMAGE_FORMATS.items():
     _IMAGE_SUFFIXES.add(_suffix.lower().lstrip("."))
 IMAGE_SUFFIXES = frozenset(_IMAGE_SUFFIXES)
 
-# Preferred names of the SQLite lookup tables holding the image identifier to
-# file path mapping, in order of preference.
-LOOKUP_TABLE_CANDIDATES = ("images", "image_lookup", "lookup")
-
 
 class IIIFImageService:
     """Serve IIIF image requests for images registered in the lookup database."""
@@ -153,10 +149,7 @@ class IIIFImageService:
             candidates += [f"{identifier}{ext}" for ext in LOOKUP_EXTENSIONS]
         conn = sqlite3.connect(str(self.lookup_db))
         try:
-            table = self._lookup_table(conn)
-            if table is None:
-                return None
-            query = f'SELECT "path" FROM "{table}" WHERE "identifier" = ?'
+            query = 'SELECT "path" FROM "image_map" WHERE "identifier" = ?'
             for candidate in candidates:
                 row = conn.execute(query, (candidate,)).fetchone()
                 if row is not None and row[0]:
@@ -167,20 +160,6 @@ class IIIFImageService:
             return None
         finally:
             conn.close()
-
-    def _lookup_table(self, conn) -> str | None:
-        """Return the name of the lookup table holding the identifier mapping."""
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-        names = [row[0] for row in rows]
-        candidates = [name for name in LOOKUP_TABLE_CANDIDATES if name in names]
-        candidates += [name for name in names if name not in LOOKUP_TABLE_CANDIDATES]
-        for name in candidates:
-            columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{name}")')}
-            if {"identifier", "path"} <= columns:
-                return name
-        return None
 
     def _load(self, identifier: str):
         path = self.find_image(identifier)
