@@ -2,6 +2,7 @@
 
 import io
 import sqlite3
+from unittest import mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -296,3 +297,42 @@ def test_image_writes_atomically_to_cache(tmp_path, lookup_db):
     cached_files = list(cache_dir.glob("*")) if cache_dir.is_dir() else []
     assert len(cached_files) == 1
     assert cached_files[0].read_bytes() == data
+
+
+def test_full_size_request_does_not_render(tmp_path, lookup_db):
+    make_image(tmp_path / "fullsize.jpg", width=200, height=100)
+    register_image(lookup_db, "fullsize.jpg", tmp_path / "fullsize.jpg")
+    cache_dir = tmp_path / "cache"
+    svc = IIIFImageService(str(lookup_db), cache_dir=str(cache_dir))
+    original = (tmp_path / "fullsize.jpg").read_bytes()
+    with mock.patch.object(IIIFImageService, "_render") as render:
+        data, mime = svc.image_bytes("fullsize.jpg", "full", "max", "0", "default", "jpg")
+    render.assert_not_called()
+    assert mime == "image/jpeg"
+    # The original file is served through a link in the cache directory.
+    assert data == original
+    cached_files = list(cache_dir.glob("*")) if cache_dir.is_dir() else []
+    assert len(cached_files) == 1
+    assert cached_files[0].is_symlink()
+
+
+def test_full_size_request_format_mismatch_renders(tmp_path, lookup_db):
+    make_image(tmp_path / "fullsize2.jpg", width=200, height=100)
+    register_image(lookup_db, "fullsize2.jpg", tmp_path / "fullsize2.jpg")
+    cache_dir = tmp_path / "cache"
+    svc = IIIFImageService(str(lookup_db), cache_dir=str(cache_dir))
+    with mock.patch.object(IIIFImageService, "_render", wraps=svc._render) as render:
+        data, mime = svc.image_bytes("fullsize2.jpg", "full", "max", "0", "default", "png")
+    render.assert_called_once()
+    assert mime == "image/png"
+
+
+def test_full_size_request_rotation_renders(tmp_path, lookup_db):
+    make_image(tmp_path / "fullsize3.jpg", width=200, height=100)
+    register_image(lookup_db, "fullsize3.jpg", tmp_path / "fullsize3.jpg")
+    cache_dir = tmp_path / "cache"
+    svc = IIIFImageService(str(lookup_db), cache_dir=str(cache_dir))
+    with mock.patch.object(IIIFImageService, "_render", wraps=svc._render) as render:
+        data, mime = svc.image_bytes("fullsize3.jpg", "full", "max", "90", "default", "jpg")
+    render.assert_called_once()
+    assert mime == "image/jpeg"

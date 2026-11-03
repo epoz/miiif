@@ -427,6 +427,30 @@ class IIIFImageService:
 
         return data, mime
 
+    def _is_full_size_request(self, region: str, size: str, rotation: str, quality: str, fmt: str) -> bool:
+        """Return True when a request resolves to the full size file as-is.
+
+        This is the case when the whole image is requested (region ``full``)
+        without any manipulation being needed (no cropping, no resizing, no
+        rotation, default quality) and a supported format is requested. Such
+        requests can be served directly from the original file instead of
+        being rendered through libvips.
+        """
+        if (region or "full").strip() != "full":
+            return False
+        if (size or "max").strip() not in ("", "max", "full"):
+            return False
+        rotation = (rotation or "0").strip()
+        if rotation.startswith("!") or rotation not in ("", "0"):
+            return False
+        quality = (quality or "default").strip().lower()
+        if quality not in ("", "default", "color"):
+            return False
+        fmt_key = (fmt or "jpg").strip().lower().lstrip(".")
+        if fmt_key not in IMAGE_FORMATS:
+            return False
+        return True
+
     def image_bytes(self, identifier: str, region: str, size: str, rotation: str, quality: str, fmt: str) -> tuple:
         final_path = None
         if self.cache_dir is not None:
@@ -443,6 +467,35 @@ class IIIFImageService:
                         return final_path.read_bytes(), IMAGE_FORMATS[fmt_key][0]
             except OSError:
                 pass
+        if self._is_full_size_request(region, size, rotation, quality, fmt):
+            source_path = self.find_image(identifier)
+            source_fmt_key = source_path.suffix.lower().lstrip(".")
+            source_mime = IMAGE_FORMATS[source_fmt_key][0] if source_fmt_key in IMAGE_FORMATS else None
+            fmt_key = (fmt or "jpg").strip().lower().lstrip(".")
+            if source_mime == IMAGE_FORMATS[fmt_key][0]:
+                source_image = pyvips.Image.new_from_file(str(source_path))
+                width, height = source_image.width, source_image.height
+                tw, th = self._apply_limits(width, height, width, height)
+                if tw == width and th == height:
+                    # The full size image is being requested without any
+                    # manipulation needed (full region, size within bounds, no
+                    # rotation, default quality, matching format): there is
+                    # nothing to render, so instead of generating a rendered copy
+                    # of the image through libvips and writing it to the cache,
+                    # the original image file is linked to the cached filename
+                    # and the linked file is served.
+                    mime = IMAGE_FORMATS[fmt_key][0]
+                    data = source_path.read_bytes()
+                    if final_path is not None:
+                        try:
+                            final_path.parent.mkdir(parents=True, exist_ok=True)
+                            if final_path.is_symlink() or final_path.exists():
+                                final_path.unlink()
+                            final_path.symlink_to(str(source_path))
+                            data = final_path.read_bytes()
+                        except OSError:
+                            pass
+                    return data, mime
         data, mime = self._render(identifier, region, size, rotation, quality, fmt)
         # Write the generated image to the cache directory atomically so that
         # a caching reverse proxy (e.g. Caddy) can serve it directly from disk
