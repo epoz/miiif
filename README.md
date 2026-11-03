@@ -47,6 +47,11 @@ Returns a JSON-LD document describing the technical properties of the image
 The served version is selected through the `Accept` header (falling back to
 `IIIF_IMAGE_API_VERSION`).
 
+Informational requests can be issued as `HEAD` as well as `GET`: a `HEAD`
+request to `/{image_id}/info.json` returns the same status code and metadata
+(media type, content length) as the corresponding `GET`, without a response
+body, so clients can probe an image's information before fetching it.
+
 ### Image requests
 
 ```
@@ -156,3 +161,6 @@ uv run python -m pytest tests/ -q
   into the configured tile cache directory, so that a caching reverse proxy such
   as Caddy can serve the tiles directly from disk before forwarding to the
   FastAPI backend.
+* Generated images are cached the same way (see `IIIFImageService.image_bytes`),
+  so that full image responses can be served directly from the cache directory
+  before falling back to the FastAPI backend.

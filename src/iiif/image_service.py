@@ -428,7 +428,34 @@ class IIIFImageService:
         return data, mime
 
     def image_bytes(self, identifier: str, region: str, size: str, rotation: str, quality: str, fmt: str) -> tuple:
-        return self._render(identifier, region, size, rotation, quality, fmt)
+        final_path = None
+        if self.cache_dir is not None:
+            try:
+                safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(identifier))
+                fmt_key = (fmt or "jpg").strip().lower().lstrip(".")
+                if fmt_key in IMAGE_FORMATS:
+                    _mime, suffix = IMAGE_FORMATS[fmt_key]
+                    key = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{region}|{size}|{rotation}|{quality}|{fmt_key}")
+                    final_path = self.cache_dir / f"{safe}__{key}.{suffix}"
+                    if final_path.is_file():
+                        # A cached copy of the image already exists; serve it
+                        # instead of rendering and caching the image again.
+                        return final_path.read_bytes(), IMAGE_FORMATS[fmt_key][0]
+            except OSError:
+                pass
+        data, mime = self._render(identifier, region, size, rotation, quality, fmt)
+        # Write the generated image to the cache directory atomically so that
+        # a caching reverse proxy (e.g. Caddy) can serve it directly from disk
+        # before falling back to the FastAPI backend.
+        if final_path is not None:
+            try:
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = final_path.parent / f".{final_path.name}.tmp.{os.getpid()}"
+                tmp_path.write_bytes(data)
+                os.replace(tmp_path, final_path)
+            except OSError:
+                pass
+        return data, mime
 
     # ------------------------------------------------------------------
     # Tiles
@@ -449,6 +476,7 @@ class IIIFImageService:
 
         count_x = max(1, int(math.ceil(width / (tile_w * scale))))
         count_y = max(1, int(math.ceil(height / (tile_h * scale))))
+        safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(identifier))
         for n in range(count_x):
             for m in range(count_y):
                 xr = n * tile_w * scale
@@ -465,6 +493,14 @@ class IIIFImageService:
                 hs = tile_h
                 if yr + tile_h * scale > height:
                     hs = int(math.ceil((height - yr) / scale))
+                # Serve a cached tile directly if one has already been generated.
+                if self.cache_dir is not None:
+                    final_path = self.cache_dir / f"{safe}__tile_{n}_{m}_{scale}.jpg"
+                    if final_path.is_file():
+                        try:
+                            return final_path.read_bytes(), "image/jpeg"
+                        except OSError:
+                            pass
                 data, mime = self._render(
                     identifier, f"{xr},{yr},{wr},{hr}", f"{ws},{hs}", "0", "default", "jpg"
                 )
@@ -474,7 +510,6 @@ class IIIFImageService:
                 if self.cache_dir is not None:
                     try:
                         self.cache_dir.mkdir(parents=True, exist_ok=True)
-                        safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(identifier))
                         final_path = self.cache_dir / f"{safe}__tile_{n}_{m}_{scale}.jpg"
                         tmp_path = self.cache_dir / f".{final_path.name}.tmp.{os.getpid()}"
                         tmp_path.write_bytes(data)

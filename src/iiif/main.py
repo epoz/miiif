@@ -74,12 +74,12 @@ def _error_response(exc: IIIFError):
     )
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok"}
 
 
-@app.get("/{image_id}/info.json")
+@app.api_route("/{image_id}/info.json", methods=["GET", "HEAD"])
 def image_info(image_id: str, request: Request, svc: IIIFImageService = Depends(get_service)):
     version = negotiate_version(request)
     base_uri = _base_uri(request)
@@ -98,7 +98,10 @@ def image_info(image_id: str, request: Request, svc: IIIFImageService = Depends(
     )
 
 
-@app.get("/{image_id}/{region}/{size}/{rotation}/{quality_format}")
+@app.api_route(
+    "/{image_id}/{region}/{size}/{rotation}/{quality_format}",
+    methods=["GET", "HEAD"],
+)
 def image_request(
     image_id: str,
     region: str,
@@ -119,7 +122,7 @@ def image_request(
     return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})
 
 
-@app.get("/{image_id}/tiles/{tile_size}/{scale}")
+@app.api_route("/{image_id}/tiles/{tile_size}/{scale}", methods=["GET", "HEAD"])
 def image_tiles(image_id: str, tile_size: str, scale: int, svc: IIIFImageService = Depends(get_service)):
     try:
         data, mime = svc.tile_bytes(image_id, tile_size, scale)

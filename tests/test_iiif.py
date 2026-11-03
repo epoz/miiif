@@ -55,6 +55,12 @@ def test_health():
     assert response.json()["status"] == "ok"
 
 
+def test_head_health():
+    response = client.head("/health")
+    assert response.status_code == 200
+    assert response.content == b""
+
+
 def test_info_json(c, tmp_path, lookup_db):
     make_image(tmp_path / "basic.jpg")
     register_image(lookup_db, "basic.jpg", tmp_path / "basic.jpg")
@@ -69,6 +75,22 @@ def test_info_json(c, tmp_path, lookup_db):
     assert body["width"] == 200
     assert body["height"] == 100
     assert body["maxWidth"] == 4000
+
+
+def test_head_info_json(c, tmp_path, lookup_db):
+    make_image(tmp_path / "basic14.jpg")
+    register_image(lookup_db, "basic14.jpg", tmp_path / "basic14.jpg")
+    response = c.head("/basic14.jpg/info.json")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/ld+json")
+    assert response.headers["content-length"]
+    assert response.content == b""
+
+
+def test_head_info_json_missing_image(c, tmp_path, lookup_db):
+    response = c.head("/doesnotexist.jpg/info.json")
+    assert response.status_code == 404
+    assert response.content == b""
 
 
 def test_info_json_v2_negotiation(c, tmp_path, lookup_db):
@@ -93,6 +115,15 @@ def test_full_image(c, tmp_path, lookup_db):
     assert len(response.content) > 0
     img = Image.open(io.BytesIO(response.content))
     assert img.size == (200, 100)
+
+
+def test_head_image(c, tmp_path, lookup_db):
+    make_image(tmp_path / "basic15.jpg")
+    register_image(lookup_db, "basic15.jpg", tmp_path / "basic15.jpg")
+    response = c.head("/basic15.jpg/full/max/0/default.jpg")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content == b""
 
 
 def test_region_and_size(c, tmp_path, lookup_db):
@@ -170,6 +201,12 @@ def test_unknown_image(c, tmp_path, lookup_db):
     assert response.status_code == 404
 
 
+def test_head_unknown_image(c, tmp_path, lookup_db):
+    response = c.head("/doesnotexist.jpg/full/max/0/default.jpg")
+    assert response.status_code == 404
+    assert response.content == b""
+
+
 def test_tiles(c, tmp_path, lookup_db):
     make_image(tmp_path / "basic11.jpg")
     register_image(lookup_db, "basic11.jpg", tmp_path / "basic11.jpg")
@@ -178,6 +215,15 @@ def test_tiles(c, tmp_path, lookup_db):
     assert response.headers["content-type"] == "image/jpeg"
     img = Image.open(io.BytesIO(response.content))
     assert img.size == (100, 50)
+
+
+def test_head_tiles(c, tmp_path, lookup_db):
+    make_image(tmp_path / "basic16.jpg")
+    register_image(lookup_db, "basic16.jpg", tmp_path / "basic16.jpg")
+    response = c.head("/basic16.jpg/tiles/100/2")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/jpeg"
+    assert response.content == b""
 
 
 def test_quality_gray(c, tmp_path, lookup_db):
@@ -234,6 +280,18 @@ def test_tile_writes_atomically_to_cache(tmp_path, lookup_db):
     cache_dir = tmp_path / "cache"
     svc = IIIFImageService(str(lookup_db), cache_dir=str(cache_dir))
     data, mime = svc.tile_bytes("cached.jpg", 100, 2)
+    assert mime == "image/jpeg"
+    cached_files = list(cache_dir.glob("*")) if cache_dir.is_dir() else []
+    assert len(cached_files) == 1
+    assert cached_files[0].read_bytes() == data
+
+
+def test_image_writes_atomically_to_cache(tmp_path, lookup_db):
+    make_image(tmp_path / "cached2.jpg")
+    register_image(lookup_db, "cached2.jpg", tmp_path / "cached2.jpg")
+    cache_dir = tmp_path / "cache"
+    svc = IIIFImageService(str(lookup_db), cache_dir=str(cache_dir))
+    data, mime = svc.image_bytes("cached2.jpg", "full", "max", "0", "default", "jpg")
     assert mime == "image/jpeg"
     cached_files = list(cache_dir.glob("*")) if cache_dir.is_dir() else []
     assert len(cached_files) == 1
