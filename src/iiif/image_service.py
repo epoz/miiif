@@ -147,6 +147,7 @@ class IIIFImageService:
         candidates = [identifier]
         if "." not in identifier:
             candidates += [f"{identifier}{ext}" for ext in LOOKUP_EXTENSIONS]
+            candidates += [f"{identifier}{ext.upper()}" for ext in LOOKUP_EXTENSIONS]
         conn = sqlite3.connect(str(self.lookup_db))
         try:
             query = 'SELECT "path" FROM "image_map" WHERE "identifier" = ?'
