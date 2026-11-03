@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iciiif-image-api"
+version = "1.0.0"
+description = "FastAPI based IIIF Image API server using libvips for image manipulation"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pyvips",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx",
+    "pytest",
+    "pytest-asyncio",
+    "pillow",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
