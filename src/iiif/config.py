@@ -19,6 +19,9 @@ DEFAULT_INFO_VERSION = "3"  # "2" or "3"
 
 DEFAULT_TILE_CACHE_DIR = "/data/iiif-cache"
 
+DEFAULT_PLAUSIBLE_API_URL = "https://plausible.io/api/event"
+DEFAULT_PLAUSIBLE_DOMAIN = ""
+
 
 class Settings:
     """Runtime settings for the IIIF image server."""
@@ -58,6 +61,14 @@ class Settings:
     @property
     def tile_cache_dir(self) -> str:
         return os.environ.get("IIIF_CACHE_DIR") or DEFAULT_TILE_CACHE_DIR
+
+    @property
+    def plausible_api_url(self) -> str:
+        return os.environ.get("IIIF_PLAUSIBLE_API_URL") or DEFAULT_PLAUSIBLE_API_URL
+
+    @property
+    def plausible_domain(self) -> str:
+        return os.environ.get("IIIF_PLAUSIBLE_DOMAIN") or DEFAULT_PLAUSIBLE_DOMAIN
 
 
 settings = Settings()

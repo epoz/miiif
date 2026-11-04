@@ -102,6 +102,8 @@ IIIF_MAX_HEIGHT=4000
 IIIF_MAX_AREA=
 IIIF_IMAGE_API_VERSION=3
 IIIF_CACHE_DIR=/var/www/iiif-cache
+IIIF_PLAUSIBLE_API_URL=https://plausible.io/api/event
+IIIF_PLAUSIBLE_DOMAIN=
 ```
 
 * `IIIF_IMAGE_DIRS` — comma separated list of directories scanned by the
@@ -114,6 +116,36 @@ IIIF_CACHE_DIR=/var/www/iiif-cache
 * `IIIF_IMAGE_API_VERSION` — default version of the image information document
   served (`3` or `2`).
 * `IIIF_CACHE_DIR` — directory used to cache generated tiles.
+* `IIIF_PLAUSIBLE_API_URL` — Plausible Events API endpoint used for usage
+  tracking (defaults to `https://plausible.io/api/event`).
+* `IIIF_PLAUSIBLE_DOMAIN` — Plausible site domain the usage events are
+  attributed to; when set, usage tracking is enabled (no events are sent
+  otherwise).
+* `IIIF_PLAUSIBLE_ENABLED` — optional explicit on/off switch for usage
+  tracking; when unset, tracking follows the presence of `IIIF_PLAUSIBLE_DOMAIN`.
+
+## Usage tracking
+
+Image API usage can be reported to a
+[Plausible](https://plausible.io) analytics instance through its
+[Events API](https://plausible.io/docs/events-api) by adding API calls that use
+the service.
+
+When a Plausible site domain is configured through `IIIF_PLAUSIBLE_DOMAIN`, the
+server sends an event to the Plausible Events API for every image API request
+that is actually served (`GET` only; `HEAD` probes are not counted as usage):
+
+* `image_info` — `GET /{image_id}/info.json`
+* `image_request` — `GET /{image_id}/{region}/{size}/{rotation}/{quality}.{format}`
+* `image_tile` — `GET /{image_id}/tiles/{tile_size}/{scale}`
+
+Each event carries the requested image identifier as a custom property and is
+sent as a JSON `POST` to the configured events endpoint, forwarding the
+`User-Agent` and `X-Forwarded-For` headers of the originating request for
+Plausible's unique visitor counting.
+
+Tracking is best effort: it is disabled unless a Plausible domain is configured
+and never fails an image request, should the Plausible instance be unreachable.
 
 ## Populating the image lookup database
 
@@ -164,3 +196,8 @@ uv run python -m pytest tests/ -q
 * Generated images are cached the same way (see `IIIFImageService.image_bytes`),
   so that full image responses can be served directly from the cache directory
   before falling back to the FastAPI backend.
+* Requests for the full size of an image that need no manipulation (full region,
+  no resizing, no rotation, default quality, format matching the source file) are
+  served directly from the original file: the original image is linked into the
+  cache directory under the cached filename instead of generating (and caching) a
+  rendered copy through libvips.

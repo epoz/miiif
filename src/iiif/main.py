@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, Response
 
 from .config import settings
 from .image_service import IIIFError, IIIFImageService
+from .tracking import send_event
 
 app = FastAPI(
     title="IIIF Image API Server",
@@ -74,6 +75,29 @@ def _error_response(exc: IIIFError):
     )
 
 
+def _track(
+    name: str,
+    url: str,
+    image_id: str,
+    request: Request,
+) -> None:
+    """Send a best effort usage event to the Plausible Events API.
+
+    Image API usage is reported through Plausible (see
+    https://plausible.io/docs/events-api); HEAD requests are ignored since they
+    are only used as probes and do not constitute usage.
+    """
+    if request.method != "GET":
+        return
+    send_event(
+        name=name,
+        url=url,
+        props={"image_id": image_id},
+        user_agent=request.headers.get("user-agent"),
+        forwarded_for=request.headers.get("x-forwarded-for"),
+    )
+
+
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok"}
@@ -83,6 +107,7 @@ def health():
 def image_info(image_id: str, request: Request, svc: IIIFImageService = Depends(get_service)):
     version = negotiate_version(request)
     base_uri = _base_uri(request)
+    _track("image_info", f"{base_uri}/{image_id}/info.json", image_id, request)
     try:
         document = svc.info_document(image_id, version, base_uri)
     except IIIFError as exc:
@@ -115,6 +140,10 @@ def image_request(
     quality, _, fmt = quality_format.partition(".")
     quality = quality or "default"
     fmt = fmt or "jpg"
+    image_url = (
+        f"{_base_uri(request)}/{image_id}/{region}/{size}/{rotation}/{quality}.{fmt}"
+    )
+    _track("image_request", image_url, image_id, request)
     try:
         data, mime = svc.image_bytes(image_id, region, size, rotation, quality, fmt)
     except IIIFError as exc:
@@ -123,7 +152,15 @@ def image_request(
 
 
 @app.api_route("/{image_id}/tiles/{tile_size}/{scale}", methods=["GET", "HEAD"])
-def image_tiles(image_id: str, tile_size: str, scale: int, svc: IIIFImageService = Depends(get_service)):
+def image_tiles(
+    image_id: str,
+    tile_size: str,
+    scale: int,
+    request: Request,
+    svc: IIIFImageService = Depends(get_service),
+):
+    tiles_url = f"{_base_uri(request)}/{image_id}/tiles/{tile_size}/{scale}"
+    _track("image_tile", tiles_url, image_id, request)
     try:
         data, mime = svc.tile_bytes(image_id, tile_size, scale)
     except IIIFError as exc:

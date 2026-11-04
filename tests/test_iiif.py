@@ -1,6 +1,7 @@
 """Tests for the IIIF Image API server."""
 
 import io
+import json
 import sqlite3
 from unittest import mock
 
@@ -8,9 +9,11 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from iiif import tracking
 from iiif.main import app, get_service
 from iiif.image_service import BadRequest, ImageNotFound, IIIFImageService
 from iiif.populate import populate
+from iiif.tracking import send_event
 
 client = TestClient(app)
 
@@ -336,3 +339,135 @@ def test_full_size_request_rotation_renders(tmp_path, lookup_db):
         data, mime = svc.image_bytes("fullsize3.jpg", "full", "max", "90", "default", "jpg")
     render.assert_called_once()
     assert mime == "image/jpeg"
+
+
+class _FakePlausibleResponse:
+    status = 202
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+def test_send_event_disabled_without_domain(monkeypatch):
+    monkeypatch.delenv("IIIF_PLAUSIBLE_DOMAIN", raising=False)
+    monkeypatch.delenv("IIIF_PLAUSIBLE_ENABLED", raising=False)
+    with mock.patch.object(tracking.urllib.request, "urlopen") as urlopen:
+        assert send_event("image_info", "http://example.org/img/info.json") is False
+        urlopen.assert_not_called()
+
+
+def test_send_event_respects_enabled_flag(monkeypatch):
+    monkeypatch.setenv("IIIF_PLAUSIBLE_DOMAIN", "example.org")
+    monkeypatch.setenv("IIIF_PLAUSIBLE_ENABLED", "0")
+    with mock.patch.object(tracking.urllib.request, "urlopen") as urlopen:
+        assert send_event("image_info", "http://example.org/img/info.json") is False
+        urlopen.assert_not_called()
+
+
+def test_send_event_posts_payload_to_plausible(monkeypatch):
+    monkeypatch.setenv("IIIF_PLAUSIBLE_DOMAIN", "example.org")
+    captured = {}
+
+    def fake_urlopen(request, timeout=None):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return _FakePlausibleResponse()
+
+    monkeypatch.setattr(tracking.urllib.request, "urlopen", fake_urlopen)
+    ok = send_event(
+        "image_request",
+        "http://example.org/img/full/max/0/default.jpg",
+        props={"image_id": "img.jpg"},
+        user_agent="Mozilla/5.0 (TestClient)",
+        forwarded_for="127.0.0.1",
+    )
+    assert ok is True
+    request = captured["request"]
+    assert request.get_method() == "POST"
+    assert request.full_url == "https://plausible.io/api/event"
+    payload = json.loads(request.data.decode("utf-8"))
+    assert payload["name"] == "image_request"
+    assert payload["url"] == "http://example.org/img/full/max/0/default.jpg"
+    assert payload["domain"] == "example.org"
+    assert payload["props"] == {"image_id": "img.jpg"}
+    assert request.headers["Content-type"] == "application/json"
+    assert request.headers["User-agent"] == "Mozilla/5.0 (TestClient)"
+    assert request.headers["X-forwarded-for"] == "127.0.0.1"
+    assert captured["timeout"] == 5.0
+
+
+def test_send_event_swallows_errors(monkeypatch):
+    monkeypatch.setenv("IIIF_PLAUSIBLE_DOMAIN", "example.org")
+
+    def failing_urlopen(request, timeout=None):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(tracking.urllib.request, "urlopen", failing_urlopen)
+    assert send_event("image_info", "http://example.org/img/info.json") is False
+
+
+def test_image_info_request_tracked(c, tmp_path, lookup_db, monkeypatch):
+    make_image(tmp_path / "tracked.jpg")
+    register_image(lookup_db, "tracked.jpg", tmp_path / "tracked.jpg")
+    monkeypatch.setenv("IIIF_PLAUSIBLE_DOMAIN", "example.org")
+    send_event_mock = mock.Mock(return_value=True)
+    monkeypatch.setattr("iiif.main.send_event", send_event_mock)
+    response = c.get("/tracked.jpg/info.json")
+    assert response.status_code == 200
+    send_event_mock.assert_called_once()
+    kwargs = send_event_mock.call_args.kwargs
+    assert kwargs["name"] == "image_info"
+    assert kwargs["url"] == "http://testserver/tracked.jpg/info.json"
+    assert kwargs["props"]["image_id"] == "tracked.jpg"
+
+
+def test_image_request_tracked(c, tmp_path, lookup_db, monkeypatch):
+    make_image(tmp_path / "tracked2.jpg")
+    register_image(lookup_db, "tracked2.jpg", tmp_path / "tracked2.jpg")
+    monkeypatch.setenv("IIIF_PLAUSIBLE_DOMAIN", "example.org")
+    send_event_mock = mock.Mock(return_value=True)
+    monkeypatch.setattr("iiif.main.send_event", send_event_mock)
+    response = c.get("/tracked2.jpg/full/max/0/default.jpg")
+    assert response.status_code == 200
+    send_event_mock.assert_called_once()
+    kwargs = send_event_mock.call_args.kwargs
+    assert kwargs["name"] == "image_request"
+    assert kwargs["url"] == "http://testserver/tracked2.jpg/full/max/0/default.jpg"
+    assert kwargs["props"]["image_id"] == "tracked2.jpg"
+
+
+def test_tiles_request_tracked(c, tmp_path, lookup_db, monkeypatch):
+    make_image(tmp_path / "tracked3.jpg")
+    register_image(lookup_db, "tracked3.jpg", tmp_path / "tracked3.jpg")
+    monkeypatch.setenv("IIIF_PLAUSIBLE_DOMAIN", "example.org")
+    send_event_mock = mock.Mock(return_value=True)
+    monkeypatch.setattr("iiif.main.send_event", send_event_mock)
+    response = c.get("/tracked3.jpg/tiles/100/2")
+    assert response.status_code == 200
+    send_event_mock.assert_called_once()
+    kwargs = send_event_mock.call_args.kwargs
+    assert kwargs["name"] == "image_tile"
+    assert kwargs["url"] == "http://testserver/tracked3.jpg/tiles/100/2"
+    assert kwargs["props"]["image_id"] == "tracked3.jpg"
+
+
+@pytest.mark.parametrize(
+    "method,url",
+    [
+        ("HEAD", "/tracked4.jpg/info.json"),
+        ("HEAD", "/tracked4.jpg/full/max/0/default.jpg"),
+        ("HEAD", "/tracked4.jpg/tiles/100/2"),
+    ],
+)
+def test_head_requests_not_tracked(c, tmp_path, lookup_db, monkeypatch, method, url):
+    make_image(tmp_path / "tracked4.jpg")
+    register_image(lookup_db, "tracked4.jpg", tmp_path / "tracked4.jpg")
+    monkeypatch.setenv("IIIF_PLAUSIBLE_DOMAIN", "example.org")
+    send_event_mock = mock.Mock(return_value=True)
+    monkeypatch.setattr("iiif.main.send_event", send_event_mock)
+    response = getattr(c, method.lower())(url)
+    assert response.status_code == 200
+    send_event_mock.assert_not_called()
