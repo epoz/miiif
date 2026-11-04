@@ -190,12 +190,7 @@ uv run python -m pytest tests/ -q
 * All image manipulation (region extraction, resizing, rotation, quality,
   format conversion) is performed by libvips.
 * Generated tiles are written atomically (write to temporary file, then `os.replace`)
-  into the configured tile cache directory, so that a caching reverse proxy such
-  as Caddy can serve the tiles directly from disk before forwarding to the
-  FastAPI backend.
-* Generated images are cached the same way (see `IIIFImageService.image_bytes`),
-  so that full image responses can be served directly from the cache directory
-  before falling back to the FastAPI backend.
+  into the configured tile cache directory.
 * Requests for the full size of an image that need no manipulation (full region,
   no resizing, no rotation, default quality, format matching the source file) are
   served directly from the original file: the original image is linked into the
