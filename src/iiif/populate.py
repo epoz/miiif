@@ -44,7 +44,6 @@ def populate(directories, db_path) -> int:
                     if path.suffix.lower().lstrip(".") not in IMAGE_SUFFIXES:
                         continue
                     entries.append((path.name, str(path)))
-        conn.execute("DELETE FROM image_map")
         conn.executemany(
             "INSERT OR IGNORE INTO image_map (identifier, path) VALUES (?, ?)",
             entries,
