@@ -1,9 +1,8 @@
 """Command line script to populate the IIIF image lookup database.
 
-Scans the configured image directories (or the directories given on the
-command line) for image files -- recursively, including subdirectories -- and
-(Re)builds the SQLite lookup database that maps image identifiers to file
-paths.
+Scans the image directories given on the command line for image files --
+recursively, including subdirectories -- and (Re)builds the SQLite lookup
+database that maps image identifiers to file paths.
 """
 
 import argparse
@@ -11,13 +10,13 @@ import os
 import sqlite3
 from pathlib import Path
 
-from .config import settings
 from .image_service import IMAGE_SUFFIXES
 
 LOOKUP_SCHEMA = """
 CREATE TABLE IF NOT EXISTS image_map (
-    identifier TEXT PRIMARY KEY,
-    path TEXT NOT NULL
+    identifier TEXT NOT NULL,
+    path TEXT NOT NULL,
+    UNIQUE (identifier, path)
 )
 """
 
@@ -60,31 +59,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="iiif-populate",
         description=(
-            "Populate the IIIF image lookup database from configured image directories."
+            "Populate the IIIF image lookup database from the given image directories."
         ),
     )
     parser.add_argument(
         "--dirs",
         nargs="+",
-        default=None,
-        help=(
-            "Image directories to scan for images "
-            "(defaults to the configured IIIF_IMAGE_DIRS)."
-        ),
+        required=True,
+        help="Image directories to scan for images.",
     )
     parser.add_argument(
         "--db",
-        default=None,
-        help=(
-            "Path to the SQLite lookup database "
-            "(defaults to the configured IIIF_IMAGE_DB)."
-        ),
+        required=True,
+        help="Path to the SQLite lookup database.",
     )
     args = parser.parse_args(argv)
-    directories = (
-        list(args.dirs) if args.dirs is not None else list(settings.search_dirs)
-    )
-    db_path = Path(args.db) if args.db else Path(settings.image_db)
+    directories = args.dirs
+    db_path = Path(args.db)
     count = populate(directories, db_path)
     print(f"Indexed {count} image(s) into {db_path}")
     return 0

@@ -95,7 +95,6 @@ Settings can be provided through environment variables, optionally via a `.env`
 file placed in the project root (loaded automatically via `python-dotenv`):
 
 ```bash
-IIIF_IMAGE_DIRS=/data/images,/data/images2
 IIIF_IMAGE_DB=/data/images.db
 IIIF_MAX_WIDTH=4000
 IIIF_MAX_HEIGHT=4000
@@ -106,9 +105,6 @@ IIIF_PLAUSIBLE_API_URL=https://plausible.io/api/event
 IIIF_PLAUSIBLE_DOMAIN=
 ```
 
-* `IIIF_IMAGE_DIRS` — comma separated list of directories scanned by the
-  `iiif-populate` command to build the image lookup database (in order of
-  priority). Defaults to `/data/images`.
 * `IIIF_IMAGE_DB` — path to the SQLite image lookup database used to resolve
   image identifiers to files. Defaults to `/data/images.db`.
 * `IIIF_MAX_WIDTH`, `IIIF_MAX_HEIGHT`, `IIIF_MAX_AREA` — server imposed maximum
@@ -150,12 +146,11 @@ and never fails an image request, should the Plausible instance be unreachable.
 ## Populating the image lookup database
 
 Image identifiers are resolved through a SQLite database with an `identifier`
-and a `path` column (a lookup table). The database is populated from the
-configured image directories (or from the directories passed to the command)
-by scanning them recursively for image files:
+and a `path` column (a lookup table). The database is populated by scanning
+image directories recursively for image files:
 
 ```bash
-uv run python -m iiif.populate
+uv run python -m iiif.populate --dirs /data/images --db /data/images.db
 ```
 
 The command indexes every supported image file found (including files in
@@ -164,16 +159,11 @@ the full file path as location. Afterwards the server looks images up in this
 database instead of scanning directories at request time:
 
 ```bash
-IIIF_IMAGE_DIRS=/data/images uv run python -m iiif.populate
 uv run uvicorn iiif.main:app --host 0.0.0.0 --port 8000
 ```
 
-Use `--dirs` / `--db` to override the scanned directories and the database
-path, e.g.:
-
-```bash
-uv run python -m iiif.populate --dirs /data/images /data/images2 --db /data/images.db
-```
+The directories to scan (`--dirs`, one or more paths) and the lookup database
+to populate (`--db`) are both passed on the command line and are required.
 
 ## Tests
 
@@ -184,9 +174,9 @@ uv run python -m pytest tests/ -q
 ## Notes
 
 * Image identifiers are looked up in the SQLite lookup database populated by
-  the `iiif.populate` command; when the database is built from multiple
-  directories, entries from directories earlier in the configuration order take
-  precedence.
+  the `iiif.populate` command; since the combination of identifier and path is
+  unique, the same image identifier may be registered with several paths (e.g.
+  when the same file name occurs in multiple scanned directories).
 * All image manipulation (region extraction, resizing, rotation, quality,
   format conversion) is performed by libvips.
 * Generated tiles are written atomically (write to temporary file, then `os.replace`)
